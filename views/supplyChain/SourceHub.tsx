@@ -1,7 +1,9 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   Database, 
+  Box,
   FileVideo, 
   FileText, 
   Image as ImageIcon, 
@@ -35,19 +37,31 @@ import {
   FolderOpen,
   PieChart,
   RefreshCw,
-  List,
+  List as ListIcon,
   ChevronLeft,
   ChevronRight,
   Edit2,
   Save,
   Plus,
-  AlertCircle
+  AlertCircle,
+  History,
+  GitCommit,
+  User
 } from 'lucide-react';
 import { useDictionary } from '../../contexts/DictionaryContext';
 
 // --- Types ---
 
 type AssetStatus = 'cataloged' | 'triaging' | 'unprocessed';
+
+interface AssetHistoryEvent {
+    id: string;
+    type: 'import' | 'update' | 'dispatch' | 'triage';
+    timestamp: string;
+    operator: string;
+    description: string;
+    versionTag?: string;
+}
 
 interface SourceAsset {
   id: string;
@@ -57,34 +71,43 @@ interface SourceAsset {
   status: AssetStatus;
   resolution?: string;
   source: string;
-  date: string;
-  lastUpdated: string; // New field
+  initialTime: string; // New: Initialization Time
+  date: string; // Collection Date
+  lastUpdated: string; // Last Update Time
   size: string;
   sizeBytes: number; // For stats
   tags: string[];
   location?: { x: number; y: number };
+  history?: AssetHistoryEvent[]; // New: History records
 }
 
 // --- Mock Data ---
 
-const BASE_ASSETS: SourceAsset[] = [
-  { id: 'A-001', name: 'Sat_Img_2023_Q3_RegionA.tiff', thumbnailColor: 'bg-slate-200', type: ['Satellite'], status: 'cataloged', resolution: '0.5m', source: 'Sentinel-2', date: '2023-10-01', lastUpdated: '2023-10-01 14:30', size: '4.2 TB', sizeBytes: 4200, tags: ['Raw', 'Cloud<5%'], location: {x: 25, y: 40} },
-  { id: 'A-002', name: 'City_Dashcam_Log_A12.mp4', thumbnailColor: 'bg-slate-800', type: ['StreetView'], status: 'triaging', resolution: '4K', source: 'Fleet-A', date: '2023-10-02', lastUpdated: '2023-10-03 09:15', size: '128 GB', sizeBytes: 128, tags: ['Traffic', 'Signs'], location: {x: 30, y: 45} },
-  { id: 'A-003', name: 'Gov_Doc_2023_104.pdf', thumbnailColor: 'bg-rose-50', type: ['GovDoc'], status: 'unprocessed', source: 'GovPortal', date: '2023-10-05', lastUpdated: '2023-10-05 11:00', size: '2.4 MB', sizeBytes: 0.002, tags: ['Admin', 'Policy'], location: {x: 70, y: 65} },
-  { id: 'A-004', name: 'Drone_Survey_Block_7.las', thumbnailColor: 'bg-emerald-100', type: ['Drone'], status: 'cataloged', resolution: '0.1m', source: 'DJI-Ent', date: '2023-10-06', lastUpdated: '2023-10-07 16:45', size: '8.5 GB', sizeBytes: 8.5, tags: ['LiDAR', 'Construction'], location: {x: 55, y: 20} },
-  { id: 'A-005', name: 'Web_Crawl_POI_Yelp.json', thumbnailColor: 'bg-amber-50', type: ['WebCrawl'], status: 'cataloged', source: 'Spider-V2', date: '2023-10-07', lastUpdated: '2023-10-08 08:20', size: '450 MB', sizeBytes: 0.45, tags: ['POI', 'Retail'] },
-  { id: 'A-006', name: 'Sat_Img_2023_Q3_RegionB.tiff', thumbnailColor: 'bg-slate-200', type: ['Satellite'], status: 'unprocessed', resolution: '0.5m', source: 'Sentinel-2', date: '2023-10-08', lastUpdated: '2023-10-08 13:10', size: '3.8 TB', sizeBytes: 3800, tags: ['Raw'], location: {x: 80, y: 50} },
-  { id: 'A-007', name: 'Street_View_Sector_9.mp4', thumbnailColor: 'bg-slate-700', type: ['StreetView'], status: 'cataloged', resolution: '4K', source: 'Fleet-B', date: '2023-10-09', lastUpdated: '2023-10-10 10:05', size: '64 GB', sizeBytes: 64, tags: ['Roads'], location: {x: 78, y: 55} },
-  { id: 'A-008', name: 'Official_Plan_Amendment.pdf', thumbnailColor: 'bg-rose-50', type: ['GovDoc'], status: 'triaging', source: 'CityHall', date: '2023-10-10', lastUpdated: '2023-10-11 15:30', size: '5.1 MB', sizeBytes: 0.005, tags: ['Zoning'], location: {x: 72, y: 68} },
+const MOCK_HISTORY: AssetHistoryEvent[] = [
+    { id: 'h1', type: 'dispatch', timestamp: '2023-10-15 09:00', operator: 'System', description: '投递至路网产线 v2.1', versionTag: 'V3' },
+    { id: 'h2', type: 'update', timestamp: '2023-10-10 14:30', operator: 'Admin_A', description: '更新空间元数据，修正坐标偏置', versionTag: 'V2' },
+    { id: 'h3', type: 'triage', timestamp: '2023-10-02 11:20', operator: 'AI_Triage', description: '自动打标：卫星影像、无云', versionTag: 'V1.1' },
+    { id: 'h4', type: 'import', timestamp: '2023-10-01 10:00', operator: 'System', description: '原始数据接入自 Sentinel-2 接口', versionTag: 'V1' },
 ];
 
-// Generate more data for pagination demo
+const BASE_ASSETS: SourceAsset[] = [
+  { id: 'A-001', name: 'Sat_Img_2023_Q3_RegionA.tiff', thumbnailColor: 'bg-slate-200', type: ['Satellite'], status: 'cataloged', resolution: '0.5m', source: 'Sentinel-2', initialTime: '2023-10-01 10:00', date: '2023-10-01', lastUpdated: '2023-10-15 09:00', size: '4.2 TB', sizeBytes: 4200, tags: ['Raw', 'Cloud<5%'], location: {x: 25, y: 40}, history: MOCK_HISTORY },
+  { id: 'A-002', name: 'City_Dashcam_Log_A12.mp4', thumbnailColor: 'bg-slate-800', type: ['StreetView'], status: 'triaging', resolution: '4K', source: 'Fleet-A', initialTime: '2023-10-02 08:00', date: '2023-10-02', lastUpdated: '2023-10-03 09:15', size: '128 GB', sizeBytes: 128, tags: ['Traffic', 'Signs'], location: {x: 30, y: 45}, history: MOCK_HISTORY.slice(2) },
+  { id: 'A-003', name: 'Gov_Doc_2023_104.pdf', thumbnailColor: 'bg-rose-50', type: ['GovDoc'], status: 'unprocessed', source: 'GovPortal', initialTime: '2023-10-05 11:00', date: '2023-10-05', lastUpdated: '2023-10-05 11:00', size: '2.4 MB', sizeBytes: 0.002, tags: ['Admin', 'Policy'], location: {x: 70, y: 65}, history: [MOCK_HISTORY[3]] },
+  { id: 'A-004', name: 'Drone_Survey_Block_7.las', thumbnailColor: 'bg-emerald-100', type: ['Drone'], status: 'cataloged', resolution: '0.1m', source: 'DJI-Ent', initialTime: '2023-10-06 15:00', date: '2023-10-06', lastUpdated: '2023-10-07 16:45', size: '8.5 GB', sizeBytes: 8.5, tags: ['LiDAR', 'Construction'], location: {x: 55, y: 20}, history: MOCK_HISTORY.slice(1) },
+  { id: 'A-005', name: 'Web_Crawl_POI_Yelp.json', thumbnailColor: 'bg-amber-50', type: ['WebCrawl'], status: 'cataloged', source: 'Spider-V2', initialTime: '2023-10-07 08:20', date: '2023-10-07', lastUpdated: '2023-10-08 08:20', size: '450 MB', sizeBytes: 0.45, tags: ['POI', 'Retail'], history: MOCK_HISTORY.slice(2) },
+  { id: 'A-006', name: 'Sat_Img_2023_Q3_RegionB.tiff', thumbnailColor: 'bg-slate-200', type: ['Satellite'], status: 'unprocessed', resolution: '0.5m', source: 'Sentinel-2', initialTime: '2023-10-08 13:10', date: '2023-10-08', lastUpdated: '2023-10-08 13:10', size: '3.8 TB', sizeBytes: 3800, tags: ['Raw'], location: {x: 80, y: 50}, history: [MOCK_HISTORY[3]] },
+  { id: 'A-007', name: 'Street_View_Sector_9.mp4', thumbnailColor: 'bg-slate-700', type: ['StreetView'], status: 'cataloged', resolution: '4K', source: 'Fleet-B', initialTime: '2023-10-09 10:05', date: '2023-10-09', lastUpdated: '2023-10-10 10:05', size: '64 GB', sizeBytes: 64, tags: ['Roads'], location: {x: 78, y: 55}, history: MOCK_HISTORY.slice(2) },
+  { id: 'A-008', name: 'Official_Plan_Amendment.pdf', thumbnailColor: 'bg-rose-50', type: ['GovDoc'], status: 'triaging', source: 'CityHall', initialTime: '2023-10-10 12:00', date: '2023-10-10', lastUpdated: '2023-10-11 15:30', size: '5.1 MB', sizeBytes: 0.005, tags: ['Zoning'], location: {x: 72, y: 68}, history: MOCK_HISTORY.slice(2) },
+];
+
 const INITIAL_MOCK_ASSETS: SourceAsset[] = Array.from({ length: 3 }).flatMap((_, i) => 
     BASE_ASSETS.map((asset, j) => ({
         ...asset,
         id: `${asset.id}-${i}`,
         name: i === 0 ? asset.name : asset.name.replace('.', `_v${i}.`),
         date: `2023-10-${10 + i + j}`,
+        initialTime: `2023-10-${10 + i + j} 08:00`,
         lastUpdated: `2023-10-${11 + i + j} ${10 + j}:30`,
         location: asset.location ? { x: (asset.location.x + i * 10) % 100, y: (asset.location.y + j * 5) % 100 } : undefined
     }))
@@ -103,14 +126,9 @@ const ASSET_TYPE_ICONS: Record<string, React.ElementType> = {
 const StatDashboard = ({ assets }: { assets: SourceAsset[] }) => {
     const { dictionary } = useDictionary();
     const dictionaryTypes = dictionary['data_type'] || [];
-
     const totalSize = assets.reduce((acc, curr) => acc + curr.sizeBytes, 0);
-    
-    // Count types (an asset can have multiple types)
     const typeCount = assets.reduce((acc, curr) => {
-        curr.type.forEach(t => {
-            acc[t] = (acc[t] || 0) + 1;
-        });
+        curr.type.forEach(t => { acc[t] = (acc[t] || 0) + 1; });
         return acc;
     }, {} as Record<string, number>);
 
@@ -143,7 +161,6 @@ const StatDashboard = ({ assets }: { assets: SourceAsset[] }) => {
                         const width = totalTypes > 0 ? (count / totalTypes) * 100 : 0;
                         const dictItem = dictionaryTypes.find(d => d.value === typeValue);
                         const colorClass = dictItem?.color ? `bg-${dictItem.color}-500` : 'bg-slate-500';
-                        
                         return <div key={typeValue} className={`h-full ${colorClass}`} style={{ width: `${width}%` }} title={`${dictItem?.label || typeValue}: ${count}`}></div>
                     })}
                 </div>
@@ -167,7 +184,7 @@ const StatDashboard = ({ assets }: { assets: SourceAsset[] }) => {
 
 const UploadModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
     const [activeTab, setActiveTab] = useState<'file' | 'db' | 'ftp'>('file');
-    const [syncPeriod, setSyncPeriod] = useState('hourly'); // Restored state
+    const [syncPeriod, setSyncPeriod] = useState('hourly');
 
     if (!isOpen) return null;
 
@@ -303,8 +320,8 @@ const DetailDrawer = ({ asset, onClose, onUpdate }: { asset: SourceAsset, onClos
     const dictionaryTypes = dictionary['data_type'] || [];
     const [isEditingType, setIsEditingType] = useState(false);
     const [editedTypes, setEditedTypes] = useState<string[]>(asset.type);
+    const [activeRightTab, setActiveRightTab] = useState<'info' | 'history'>('info');
 
-    // Reset edited types when asset changes
     useEffect(() => {
         setEditedTypes(asset.type);
         setIsEditingType(false);
@@ -316,22 +333,15 @@ const DetailDrawer = ({ asset, onClose, onUpdate }: { asset: SourceAsset, onClos
     };
 
     const toggleType = (typeValue: string) => {
-        setEditedTypes(prev => {
-            if (prev.includes(typeValue)) {
-                return prev.filter(t => t !== typeValue);
-            } else {
-                return [...prev, typeValue];
-            }
-        });
+        setEditedTypes(prev => prev.includes(typeValue) ? prev.filter(t => t !== typeValue) : [...prev, typeValue]);
     };
 
     return (
         <div className="absolute inset-0 z-50 bg-black/20 backdrop-blur-[1px] flex justify-end">
-            <div className="w-[800px] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
-                <div className="h-16 border-b border-slate-200 flex items-center justify-between px-6 bg-slate-50">
+            <div className="w-[900px] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+                <div className="h-16 border-b border-slate-200 flex items-center justify-between px-6 bg-slate-50 shrink-0">
                      <div className="flex items-center gap-3">
                          <div className={`p-2 rounded-lg border ${asset.type.includes('GovDoc') ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                             {/* Use first type icon or generic */}
                              {React.createElement(ASSET_TYPE_ICONS[asset.type[0]] || FileText, { className: "w-5 h-5" })}
                          </div>
                          <div>
@@ -339,81 +349,190 @@ const DetailDrawer = ({ asset, onClose, onUpdate }: { asset: SourceAsset, onClos
                              <p className="text-xs text-slate-500 font-mono">{asset.id} • {asset.size}</p>
                          </div>
                      </div>
-                     <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
-                         <X className="w-5 h-5" />
-                     </button>
+                     <div className="flex gap-2">
+                        <button className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"><Download className="w-5 h-5"/></button>
+                        <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                            <X className="w-5 h-5" />
+                        </button>
+                     </div>
                 </div>
                 <div className="flex-1 flex overflow-hidden">
                     <div className="flex-1 bg-slate-900 relative flex items-center justify-center overflow-hidden">
-                        <div className="text-white text-sm">Preview Placeholder</div>
+                        {/* Mock Preview Content */}
+                        <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700">
+                            <div className="w-24 h-24 rounded-full bg-white/10 flex items-center justify-center border border-white/20">
+                                {React.createElement(ASSET_TYPE_ICONS[asset.type[0]] || ImageIcon, { className: "w-10 h-10 text-white/50" })}
+                            </div>
+                            <div className="text-center">
+                                <div className="text-white text-sm font-bold">{asset.name}</div>
+                                <div className="text-white/40 text-xs mt-1">Previewing latest data version</div>
+                            </div>
+                        </div>
                     </div>
-                    <div className="w-80 border-l border-slate-200 bg-white flex flex-col overflow-y-auto">
-                         <div className="p-6">
-                             {/* Data Type Edit Section */}
-                             <div className="mb-6">
-                                 <div className="flex justify-between items-center mb-2">
-                                     <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                                         <FileType className="w-4 h-4 text-slate-400" /> 数据类型
-                                     </h4>
-                                     {!isEditingType ? (
-                                         <button onClick={() => setIsEditingType(true)} className="p-1 text-slate-400 hover:text-primary-600 rounded hover:bg-slate-100 transition-colors">
-                                             <Edit2 className="w-3.5 h-3.5" />
-                                         </button>
-                                     ) : (
-                                         <div className="flex gap-2">
-                                             <button onClick={() => setIsEditingType(false)} className="text-xs text-slate-500 hover:text-slate-700">Cancel</button>
-                                             <button onClick={handleSaveType} className="text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center gap-1">
-                                                 <Save className="w-3 h-3" /> Save
-                                             </button>
-                                         </div>
-                                     )}
-                                 </div>
-                                 
-                                 {isEditingType ? (
-                                     <div className="space-y-1.5 border border-slate-200 p-2 rounded-lg bg-slate-50/50">
-                                         {dictionaryTypes.map(dt => (
-                                             <label key={dt.value} className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition-colors">
-                                                 <input 
-                                                     type="checkbox" 
-                                                     checked={editedTypes.includes(dt.value)}
-                                                     onChange={() => toggleType(dt.value)}
-                                                     className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
-                                                 />
-                                                 <span className="text-sm text-slate-700">{dt.label}</span>
-                                             </label>
-                                         ))}
-                                     </div>
-                                 ) : (
-                                     <div className="flex flex-wrap gap-2">
-                                         {asset.type.map(t => {
-                                             const dictItem = dictionaryTypes.find(d => d.value === t);
-                                             const label = dictItem?.label || t;
-                                             const color = dictItem?.color || 'slate';
-                                             return (
-                                                 <span key={t} className={`px-2 py-1 rounded text-xs border bg-${color}-50 text-${color}-700 border-${color}-200 flex items-center gap-1`}>
-                                                     {label}
-                                                 </span>
-                                             );
-                                         })}
-                                         {asset.type.length === 0 && <span className="text-xs text-slate-400 italic">Unclassified</span>}
-                                     </div>
-                                 )}
-                             </div>
+                    
+                    <div className="w-96 border-l border-slate-200 bg-white flex flex-col">
+                        <div className="flex border-b border-slate-100 px-4 bg-slate-50/50 shrink-0">
+                            <button 
+                                onClick={() => setActiveRightTab('info')}
+                                className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 ${activeRightTab === 'info' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-400'}`}
+                            >
+                                元数据
+                            </button>
+                            <button 
+                                onClick={() => setActiveRightTab('history')}
+                                className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 flex items-center justify-center gap-2 ${activeRightTab === 'history' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-400'}`}
+                            >
+                                <History className="w-3.5 h-3.5"/> 历史版本
+                            </button>
+                        </div>
 
-                             <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                                 <Tag className="w-4 h-4 text-slate-400" /> 元数据 (Metadata)
-                             </h4>
-                             <div className="space-y-3">
-                                 <div>
-                                     <span className="text-xs font-bold text-slate-500 uppercase block mb-1">标签</span>
-                                     <div className="flex flex-wrap gap-2">
-                                         {asset.tags.map(t => (
-                                             <span key={t} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs border border-slate-200">{t}</span>
-                                         ))}
-                                     </div>
-                                 </div>
-                             </div>
-                         </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                            {activeRightTab === 'info' ? (
+                                <>
+                                    {/* 1. Timestamps Section */}
+                                    <section>
+                                        <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                            <Clock className="w-4 h-4 text-slate-400" /> 时间轴
+                                        </h4>
+                                        <div className="grid grid-cols-1 gap-3">
+                                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">初始化时间</div>
+                                                <div className="text-sm font-mono text-slate-700">{asset.initialTime}</div>
+                                            </div>
+                                            <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                                                <div className="text-[10px] font-bold text-blue-400 uppercase mb-1">最后更新时间</div>
+                                                <div className="text-sm font-mono text-blue-700 font-bold">{asset.lastUpdated}</div>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    {/* 2. Data Type Section */}
+                                    <section>
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="font-bold text-slate-900 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                                <FileType className="w-4 h-4 text-slate-400" /> 数据类型
+                                            </h4>
+                                            {!isEditingType ? (
+                                                <button onClick={() => setIsEditingType(true)} className="p-1 text-slate-400 hover:text-primary-600 rounded hover:bg-slate-100 transition-colors">
+                                                    <Edit2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            ) : (
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => setIsEditingType(false)} className="text-xs text-slate-500 hover:text-slate-700">Cancel</button>
+                                                    <button onClick={handleSaveType} className="text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                                                        <Save className="w-3.5 h-3.5" /> Save
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        {isEditingType ? (
+                                            <div className="space-y-1.5 border border-slate-200 p-2 rounded-lg bg-slate-50/50">
+                                                {dictionaryTypes.map(dt => (
+                                                    <label key={dt.value} className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition-colors">
+                                                        <input type="checkbox" checked={editedTypes.includes(dt.value)} onChange={() => toggleType(dt.value)} className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"/>
+                                                        <span className="text-sm text-slate-700">{dt.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {asset.type.map(t => {
+                                                    const dictItem = dictionaryTypes.find(d => d.value === t);
+                                                    const color = dictItem?.color || 'slate';
+                                                    return <span key={t} className={`px-2 py-1 rounded text-xs border bg-${color}-50 text-${color}-700 border-${color}-200`}>{dictItem?.label || t}</span>;
+                                                })}
+                                            </div>
+                                        )}
+                                    </section>
+
+                                    {/* 3. Specs Section */}
+                                    <section>
+                                        <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                            <Box className="w-4 h-4 text-slate-400" /> 技术规格
+                                        </h4>
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between text-xs py-1 border-b border-slate-50">
+                                                <span className="text-slate-500">来源</span>
+                                                <span className="text-slate-800 font-bold">{asset.source}</span>
+                                            </div>
+                                            <div className="flex justify-between text-xs py-1 border-b border-slate-50">
+                                                <span className="text-slate-500">分辨率</span>
+                                                <span className="text-slate-800 font-mono font-bold">{asset.resolution || '-'}</span>
+                                            </div>
+                                            <div className="flex justify-between text-xs py-1 border-b border-slate-50">
+                                                <span className="text-slate-500">数据量</span>
+                                                <span className="text-slate-800 font-mono font-bold">{asset.size}</span>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    {/* 4. Tags Section */}
+                                    <section>
+                                        <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                            <Tag className="w-4 h-4 text-slate-400" /> 标签 (Tags)
+                                        </h4>
+                                        <div className="flex flex-wrap gap-2">
+                                            {asset.tags.map(t => (
+                                                <span key={t} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs border border-slate-200 shadow-sm">{t}</span>
+                                            ))}
+                                            <button className="px-2.5 py-1 bg-white border border-dashed border-slate-300 rounded-lg text-xs text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-all">+ Add</button>
+                                        </div>
+                                    </section>
+                                </>
+                            ) : (
+                                /* HISTORY VIEW: Visual Timeline */
+                                <div className="space-y-6">
+                                    <div className="relative pl-6">
+                                        <div className="absolute left-1.5 top-2 bottom-4 w-0.5 bg-slate-100"></div>
+                                        <div className="space-y-8">
+                                            {asset.history?.map((evt, i) => (
+                                                <div key={evt.id} className="relative">
+                                                    {/* Node Dot */}
+                                                    <div className={`absolute -left-[23px] top-1.5 w-4 h-4 rounded-full border-4 border-white shadow-sm z-10 ${
+                                                        evt.type === 'import' ? 'bg-blue-400' : 
+                                                        evt.type === 'dispatch' ? 'bg-primary-600' :
+                                                        evt.type === 'triage' ? 'bg-amber-400' : 'bg-slate-400'
+                                                    }`}></div>
+                                                    
+                                                    <div className="flex flex-col gap-1.5">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">{evt.timestamp}</span>
+                                                            {evt.versionTag && (
+                                                                <span className="text-[10px] font-bold bg-primary-50 text-primary-600 px-1.5 py-0.5 rounded border border-primary-100">
+                                                                    {evt.versionTag}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 shadow-sm hover:border-slate-200 transition-colors">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                {evt.type === 'dispatch' ? <Send className="w-3 h-3 text-primary-500" /> : <GitCommit className="w-3 h-3 text-slate-400" />}
+                                                                <span className="text-xs font-bold text-slate-800">{evt.description}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                                                <User className="w-3 h-3" />
+                                                                <span>{evt.operator}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {(!asset.history || asset.history.length === 0) && (
+                                        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                                            <History className="w-12 h-12 mb-3 opacity-20" />
+                                            <p className="text-xs">暂无历史记录</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="p-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+                            <button className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-md shadow-primary-200 transition-all active:scale-[0.98]">
+                                投递至生产产线 &rarr;
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -529,32 +648,24 @@ const SourceHub = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
   
-  // New States for Batch Actions
   const [isBatchTagOpen, setIsBatchTagOpen] = useState(false);
   const [isBatchPushOpen, setIsBatchPushOpen] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'info'} | null>(null);
   
-  // Initialize filter state based on dictionary
   const dictionaryTypes = dictionary['data_type'] || [];
   const [filterType, setFilterType] = useState<Record<string, boolean>>({});
 
-  // Effect to sync new dictionary items to filter state (default checked)
   useEffect(() => {
       setFilterType(prev => {
           const next = { ...prev };
           dictionaryTypes.forEach(item => {
-              if (next[item.value] === undefined) {
-                  next[item.value] = true;
-              }
+              if (next[item.value] === undefined) { next[item.value] = true; }
           });
           return next;
       });
   }, [dictionaryTypes]);
 
-  // Reset page when filter changes
-  useEffect(() => {
-      setCurrentPage(1);
-  }, [filterType]);
+  useEffect(() => { setCurrentPage(1); }, [filterType]);
 
   const toggleSelection = (id: string) => {
       const newSet = new Set(selectedIds);
@@ -568,7 +679,6 @@ const SourceHub = () => {
       setActiveAsset(updatedAsset);
   };
 
-  // Batch Action Handlers
   const handleBatchDownload = () => {
       setNotification({ message: `Starting download for ${selectedIds.size} files...`, type: 'info' });
       setTimeout(() => setNotification(null), 3000);
@@ -591,9 +701,8 @@ const SourceHub = () => {
       setTimeout(() => setNotification(null), 3000);
   };
 
-  // Filter Logic: Asset is shown if ANY of its types matches a selected filter
   const filteredAssets = assets.filter(a => {
-      if (a.type.length === 0) return true; // Show unclassified or decide policy
+      if (a.type.length === 0) return true;
       return a.type.some(t => filterType[t]);
   });
 
@@ -605,13 +714,11 @@ const SourceHub = () => {
       {activeAsset && <DetailDrawer asset={activeAsset} onClose={() => setActiveAsset(null)} onUpdate={handleUpdateAsset} />}
       <UploadModal isOpen={isUploadOpen} onClose={() => setIsUploadOpen(false)} />
       
-      {/* Batch Modals & Notifications */}
       <BatchTagModal isOpen={isBatchTagOpen} onClose={() => setIsBatchTagOpen(false)} onApply={handleBatchTag} count={selectedIds.size} />
       <BatchPushModal isOpen={isBatchPushOpen} onClose={() => setIsBatchPushOpen(false)} onConfirm={handleBatchPush} count={selectedIds.size} />
       {notification && <Toast message={notification.message} type={notification.type} />}
 
       <div className="flex-1 flex gap-6 min-h-0">
-          {/* Left: Filter Sidebar */}
           <aside className="w-64 flex flex-col gap-6 shrink-0 overflow-y-auto pr-2">
               <div className="glass-panel p-4 rounded-xl">
                   <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
@@ -631,12 +738,7 @@ const SourceHub = () => {
                   <div className="space-y-2">
                       {dictionaryTypes.map(item => (
                           <label key={item.value} className="flex items-center gap-2 cursor-pointer group">
-                              <input 
-                                type="checkbox" 
-                                checked={filterType[item.value] || false} 
-                                onChange={e => setFilterType({...filterType, [item.value]: e.target.checked})}
-                                className="peer h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 transition-all"
-                              />
+                              <input type="checkbox" checked={filterType[item.value] || false} onChange={e => setFilterType({...filterType, [item.value]: e.target.checked})} className="peer h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 transition-all"/>
                               <span className="text-sm text-slate-600 group-hover:text-slate-900">{item.label}</span>
                           </label>
                       ))}
@@ -650,67 +752,29 @@ const SourceHub = () => {
                   <div className="h-32 bg-slate-100 rounded border border-slate-200 relative overflow-hidden group cursor-crosshair">
                       <div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/2000px-World_map_blank_without_borders.svg.png')] bg-cover bg-center opacity-40 grayscale group-hover:grayscale-0 transition-all"></div>
                       <div className="absolute inset-0 flex items-center justify-center">
-                          <button className="bg-white/90 backdrop-blur text-slate-600 text-xs px-3 py-1.5 rounded-full border border-slate-200 shadow-sm font-medium hover:bg-white hover:text-primary-600 transition-colors">
-                              绘制区域
-                          </button>
+                          <button className="bg-white/90 backdrop-blur text-slate-600 text-xs px-3 py-1.5 rounded-full border border-slate-200 shadow-sm font-medium hover:bg-white hover:text-primary-600 transition-colors">绘制区域</button>
                       </div>
                   </div>
               </div>
           </aside>
 
-          {/* Right: Grid/Map */}
           <div className="flex-1 flex flex-col min-h-0">
              <StatDashboard assets={filteredAssets} />
 
-             {/* Toolbar */}
              <div className="flex justify-between items-center mb-4 shrink-0">
                  <div className="relative flex-1 max-w-lg">
-                      <input 
-                          type="text" 
-                          placeholder="搜索文件名、元数据或输入语义描述..." 
-                          className="w-full pl-10 pr-10 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none shadow-sm"
-                      />
+                      <input type="text" placeholder="搜索文件名、元数据或输入语义描述..." className="w-full pl-10 pr-10 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none shadow-sm"/>
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-primary-600" title="Visual Search">
-                          <Camera className="w-4 h-4" />
-                      </button>
+                      <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-primary-600" title="Visual Search"><Camera className="w-4 h-4" /></button>
                   </div>
                   <div className="flex gap-3">
                         <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                            <button 
-                                onClick={() => setViewMode('card')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
-                                    viewMode === 'card' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                            >
-                                <LayoutGrid className="w-3.5 h-3.5" /> 卡片
-                            </button>
-                            <button 
-                                onClick={() => setViewMode('list')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
-                                    viewMode === 'list' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                            >
-                                <List className="w-3.5 h-3.5" /> 列表
-                            </button>
-                            <button 
-                                onClick={() => setViewMode('map')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
-                                    viewMode === 'map' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                            >
-                                <MapIcon className="w-3.5 h-3.5" /> 地图
-                            </button>
+                            <button onClick={() => setViewMode('card')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'card' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><LayoutGrid className="w-3.5 h-3.5" /> 卡片</button>
+                            <button onClick={() => setViewMode('list')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'list' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><ListIcon className="w-3.5 h-3.5" /> 列表</button>
+                            <button onClick={() => setViewMode('map')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'map' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><MapIcon className="w-3.5 h-3.5" /> 地图</button>
                         </div>
-                        <button className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm">
-                            <Link className="w-3 h-3" /> 接入流媒体
-                        </button>
-                        <button 
-                            onClick={() => setIsUploadOpen(true)}
-                            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm shadow-primary-200"
-                        >
-                            <Upload className="w-3 h-3" /> 上传资料
-                        </button>
+                        <button className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm"><Link className="w-3 h-3" /> 接入流媒体</button>
+                        <button onClick={() => setIsUploadOpen(true)} className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm shadow-primary-200"><Upload className="w-3 h-3" /> 上传资料</button>
                   </div>
              </div>
 
@@ -719,45 +783,28 @@ const SourceHub = () => {
                       <div className="flex-1 overflow-y-auto p-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
                               {paginatedAssets.map(asset => {
-                                  // Use the icon of the first type, or fallback
                                   const mainType = asset.type[0];
                                   const Icon = ASSET_TYPE_ICONS[mainType] || FileText;
                                   const isSelected = selectedIds.has(asset.id);
-                                  
                                   return (
-                                      <div 
-                                        key={asset.id} 
-                                        className={`glass-panel rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300 relative bg-white ${isSelected ? 'ring-2 ring-primary-500 border-primary-500' : 'border-slate-200'}`}
-                                      >
-                                          <button onClick={() => toggleSelection(asset.id)} className="absolute top-3 left-3 z-10 text-white hover:scale-110 transition-transform">
-                                              {isSelected ? <CheckSquare className="w-5 h-5 text-primary-500 bg-white rounded shadow-sm" /> : <Square className="w-5 h-5 text-slate-400/80 hover:text-white drop-shadow-md" />}
-                                          </button>
-
+                                      <div key={asset.id} className={`glass-panel rounded-xl overflow-hidden group hover:shadow-lg transition-all duration-300 relative bg-white ${isSelected ? 'ring-2 ring-primary-500 border-primary-500' : 'border-slate-200'}`}>
+                                          <button onClick={() => toggleSelection(asset.id)} className="absolute top-3 left-3 z-10 text-white hover:scale-110 transition-transform">{isSelected ? <CheckSquare className="w-5 h-5 text-primary-500 bg-white rounded shadow-sm" /> : <Square className="w-5 h-5 text-slate-400/80 hover:text-white drop-shadow-md" />}</button>
                                           <div className={`h-32 w-full ${asset.thumbnailColor} relative cursor-pointer`} onClick={() => setActiveAsset(asset)}>
                                               <div className="absolute inset-0 bg-black/5 group-hover:bg-transparent transition-colors"></div>
-                                              <span className={`absolute top-3 right-3 px-2 py-0.5 rounded text-[10px] font-bold uppercase shadow-sm border ${
-                                                  asset.status === 'cataloged' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                                                  asset.status === 'triaging' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                                                  'bg-slate-100 text-slate-600 border-slate-200'
-                                              }`}>{asset.status === 'cataloged' ? '已编目' : asset.status === 'triaging' ? '分诊中' : '未处理'}</span>
+                                              <span className={`absolute top-3 right-3 px-2 py-0.5 rounded text-[10px] font-bold uppercase shadow-sm border ${asset.status === 'cataloged' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : asset.status === 'triaging' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{asset.status === 'cataloged' ? '已编目' : asset.status === 'triaging' ? '分诊中' : '未处理'}</span>
                                               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white/30 backdrop-blur rounded-full flex items-center justify-center text-slate-700 group-hover:scale-110 transition-transform"><Icon className="w-5 h-5" /></div>
                                           </div>
-
                                           <div className="p-4">
                                               <h3 className="font-bold text-slate-900 text-sm truncate pr-2" title={asset.name}>{asset.name}</h3>
                                               <div className="flex gap-1 mt-2 mb-1 flex-wrap h-5 overflow-hidden">
                                                   {asset.type.map(t => {
                                                       const dictItem = dictionaryTypes.find(d => d.value === t);
-                                                      return (
-                                                          <span key={t} className={`text-[10px] px-1.5 rounded border ${dictItem?.color ? `bg-${dictItem.color}-50 text-${dictItem.color}-700 border-${dictItem.color}-200` : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                                              {dictItem?.label || t}
-                                                          </span>
-                                                      )
+                                                      return <span key={t} className={`text-[10px] px-1.5 rounded border ${dictItem?.color ? `bg-${dictItem.color}-50 text-${dictItem.color}-700 border-${dictItem.color}-200` : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{dictItem?.label || t}</span>
                                                   })}
                                               </div>
-                                              <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-xs text-slate-500 my-2">
-                                                  <span className="font-mono">{asset.resolution || '-'}</span><span className="text-right">{asset.source}</span>
-                                                  <span>{asset.date}</span><span className="text-right">{asset.size}</span>
+                                              <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-[10px] text-slate-500 my-2">
+                                                  <span className="font-mono">Collections: {asset.date}</span><span className="text-right">Upd: {asset.lastUpdated.split(' ')[0]}</span>
+                                                  <span>{asset.source}</span><span className="text-right font-bold text-slate-800">{asset.size}</span>
                                               </div>
                                               <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
                                                   <button onClick={() => setActiveAsset(asset)} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-medium transition-colors"><Eye className="w-3 h-3" /> 预览</button>
@@ -777,13 +824,10 @@ const SourceHub = () => {
                           <table className="w-full text-left text-sm whitespace-nowrap">
                               <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold sticky top-0 z-10 shadow-sm">
                                   <tr>
-                                      <th className="px-6 py-4 w-12 text-center">
-                                          <Square className="w-4 h-4 text-slate-400" />
-                                      </th>
+                                      <th className="px-6 py-4 w-12 text-center"><Square className="w-4 h-4 text-slate-400" /></th>
                                       <th className="px-6 py-4">文件名</th>
                                       <th className="px-6 py-4">类型</th>
-                                      <th className="px-6 py-4">分辨率</th>
-                                      <th className="px-6 py-4">来源</th>
+                                      <th className="px-6 py-4">初始化时间</th>
                                       <th className="px-6 py-4">采集时间</th>
                                       <th className="px-6 py-4">最后更新</th>
                                       <th className="px-6 py-4">大小</th>
@@ -798,51 +842,15 @@ const SourceHub = () => {
                                       const isSelected = selectedIds.has(asset.id);
                                       return (
                                           <tr key={asset.id} className="hover:bg-slate-50 group transition-colors">
-                                              <td className="px-6 py-4 text-center">
-                                                  <button onClick={() => toggleSelection(asset.id)}>
-                                                      {isSelected ? <CheckSquare className="w-4 h-4 text-primary-600" /> : <Square className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />}
-                                                  </button>
-                                              </td>
-                                              <td className="px-6 py-4">
-                                                  <div className="flex items-center gap-3">
-                                                      <div className={`p-2 rounded bg-slate-100 text-slate-600`}>
-                                                          <Icon className="w-4 h-4" />
-                                                      </div>
-                                                      <span className="font-bold text-slate-900">{asset.name}</span>
-                                                  </div>
-                                              </td>
-                                              <td className="px-6 py-4">
-                                                  <div className="flex flex-wrap gap-1 max-w-[150px]">
-                                                      {asset.type.map(t => {
-                                                          const dictItem = dictionaryTypes.find(d => d.value === t);
-                                                          return (
-                                                              <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded border ${dictItem?.color ? `bg-${dictItem.color}-50 text-${dictItem.color}-700 border-${dictItem.color}-200` : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                                                  {dictItem?.label || t}
-                                                              </span>
-                                                          )
-                                                      })}
-                                                  </div>
-                                              </td>
-                                              <td className="px-6 py-4 font-mono text-slate-500 text-xs">{asset.resolution || '-'}</td>
-                                              <td className="px-6 py-4 text-slate-600">{asset.source}</td>
+                                              <td className="px-6 py-4 text-center"><button onClick={() => toggleSelection(asset.id)}>{isSelected ? <CheckSquare className="w-4 h-4 text-primary-600" /> : <Square className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />}</button></td>
+                                              <td className="px-6 py-4"><div className="flex items-center gap-3"><div className={`p-2 rounded bg-slate-100 text-slate-600`}><Icon className="w-4 h-4" /></div><span className="font-bold text-slate-900">{asset.name}</span></div></td>
+                                              <td className="px-6 py-4"><div className="flex flex-wrap gap-1 max-w-[150px]">{asset.type.map(t => { const dictItem = dictionaryTypes.find(d => d.value === t); return <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded border ${dictItem?.color ? `bg-${dictItem.color}-50 text-${dictItem.color}-700 border-${dictItem.color}-200` : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{dictItem?.label || t}</span> })}</div></td>
+                                              <td className="px-6 py-4 font-mono text-slate-500 text-xs">{asset.initialTime}</td>
                                               <td className="px-6 py-4 font-mono text-slate-500 text-xs">{asset.date}</td>
-                                              <td className="px-6 py-4 font-mono text-slate-500 text-xs">{asset.lastUpdated}</td>
+                                              <td className="px-6 py-4 font-mono text-slate-500 text-xs font-bold text-primary-600">{asset.lastUpdated}</td>
                                               <td className="px-6 py-4 font-mono text-slate-500 text-xs">{asset.size}</td>
-                                              <td className="px-6 py-4">
-                                                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${
-                                                      asset.status === 'cataloged' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                      asset.status === 'triaging' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                                      'bg-slate-50 text-slate-600 border-slate-200'
-                                                  }`}>
-                                                      {asset.status === 'cataloged' ? '已编目' : asset.status === 'triaging' ? '分诊中' : '未处理'}
-                                                  </span>
-                                              </td>
-                                              <td className="px-6 py-4 text-right">
-                                                  <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                      <button onClick={() => setActiveAsset(asset)} className="text-slate-500 hover:text-primary-600 text-xs font-bold">预览</button>
-                                                      <button className="text-slate-500 hover:text-primary-600 text-xs font-bold">血缘</button>
-                                                  </div>
-                                              </td>
+                                              <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${asset.status === 'cataloged' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : asset.status === 'triaging' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{asset.status === 'cataloged' ? '已编目' : asset.status === 'triaging' ? '分诊中' : '未处理'}</span></td>
+                                              <td className="px-6 py-4 text-right"><div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => setActiveAsset(asset)} className="text-slate-500 hover:text-primary-600 text-xs font-bold">预览</button><button className="text-slate-500 hover:text-primary-600 text-xs font-bold">血缘</button></div></td>
                                           </tr>
                                       );
                                   })}
@@ -854,64 +862,22 @@ const SourceHub = () => {
                   {viewMode === 'map' && (
                       <div className="absolute inset-0 bg-slate-100 relative group overflow-hidden">
                           <div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/2000px-World_map_blank_without_borders.svg.png')] bg-cover bg-center opacity-60 grayscale"></div>
-                          {/* Map Markers */}
                           {paginatedAssets.filter(a => a.location).map(asset => (
-                              <div 
-                                key={asset.id} 
-                                onClick={() => setActiveAsset(asset)}
-                                className="absolute -ml-3 -mt-6 cursor-pointer group/marker z-10 hover:z-20 transition-transform hover:scale-110" 
-                                style={{ left: `${asset.location!.x}%`, top: `${asset.location!.y}%` }}
-                              >
-                                  <div className="flex flex-col items-center">
-                                      <div className="bg-white px-2 py-1 rounded shadow-md text-[10px] font-bold whitespace-nowrap mb-1 opacity-0 group-hover/marker:opacity-100 transition-opacity pointer-events-none">
-                                          {asset.name}
-                                      </div>
-                                      <MapPin className="w-6 h-6 text-primary-600 drop-shadow-md fill-white" />
-                                  </div>
+                              <div key={asset.id} onClick={() => setActiveAsset(asset)} className="absolute -ml-3 -mt-6 cursor-pointer group/marker z-10 hover:z-20 transition-transform hover:scale-110" style={{ left: `${asset.location!.x}%`, top: `${asset.location!.y}%` }}>
+                                  <div className="flex flex-col items-center"><div className="bg-white px-2 py-1 rounded shadow-md text-[10px] font-bold whitespace-nowrap mb-1 opacity-0 group-hover/marker:opacity-100 transition-opacity pointer-events-none">{asset.name}</div><MapPin className="w-6 h-6 text-primary-600 drop-shadow-md fill-white" /></div>
                               </div>
                           ))}
-                          <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-500">
-                              Displaying {paginatedAssets.length} assets
-                          </div>
+                          <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-500">Displaying {paginatedAssets.length} assets</div>
                       </div>
                   )}
 
-                  {/* Pagination Footer (Visible for Card & List views) */}
                   {(viewMode === 'card' || viewMode === 'list') && (
                       <div className="h-14 border-t border-slate-200 bg-white flex items-center justify-between px-6 shrink-0">
-                          <div className="text-xs text-slate-500">
-                              Showing <span className="font-bold text-slate-900">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="font-bold text-slate-900">{Math.min(currentPage * ITEMS_PER_PAGE, filteredAssets.length)}</span> of <span className="font-bold text-slate-900">{filteredAssets.length}</span> entries
-                          </div>
+                          <div className="text-xs text-slate-500">Showing <span className="font-bold text-slate-900">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="font-bold text-slate-900">{Math.min(currentPage * ITEMS_PER_PAGE, filteredAssets.length)}</span> of <span className="font-bold text-slate-900">{filteredAssets.length}</span> entries</div>
                           <div className="flex items-center gap-2">
-                              <button 
-                                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                  disabled={currentPage === 1}
-                                  className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                  <ChevronLeft className="w-4 h-4" />
-                              </button>
-                              <div className="flex items-center gap-1">
-                                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                                      <button 
-                                          key={page}
-                                          onClick={() => setCurrentPage(page)}
-                                          className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${
-                                              currentPage === page 
-                                              ? 'bg-primary-600 text-white' 
-                                              : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'
-                                          }`}
-                                      >
-                                          {page}
-                                      </button>
-                                  ))}
-                              </div>
-                              <button 
-                                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                  disabled={currentPage === totalPages}
-                                  className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                  <ChevronRight className="w-4 h-4" />
-                              </button>
+                              <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"><ChevronLeft className="w-4 h-4" /></button>
+                              <div className="flex items-center gap-1">{Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (<button key={page} onClick={() => setCurrentPage(page)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${currentPage === page ? 'bg-primary-600 text-white' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}>{page}</button>))}</div>
+                              <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"><ChevronRight className="w-4 h-4" /></button>
                           </div>
                       </div>
                   )}
@@ -919,7 +885,6 @@ const SourceHub = () => {
           </div>
       </div>
 
-      {/* Floating Batch Actions Bar */}
       {selectedIds.size > 0 && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-6 animate-in slide-in-from-bottom-4 z-40">
               <span className="font-bold text-sm bg-slate-700 px-2 py-0.5 rounded-md">已选择 {selectedIds.size} 项</span>

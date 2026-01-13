@@ -31,7 +31,15 @@ import {
     Layers,
     LayoutList,
     Save,
-    History
+    History,
+    Wand2,
+    Settings2,
+    ShieldCheck,
+    Cpu,
+    MousePointer2,
+    Spline,
+    Magnet,
+    Check
 } from 'lucide-react';
 import { useDictionary } from '../../../contexts/DictionaryContext';
 
@@ -43,6 +51,11 @@ export interface SOPStep {
     description: string;
     type: 'action' | 'check' | 'input';
     required: boolean;
+    config?: {
+        capabilityId?: string;
+        workbenchTools?: string[];
+        rules?: string[];
+    };
 }
 
 interface DictionaryItem {
@@ -68,10 +81,17 @@ export interface SOP {
 
 // --- Mock Data ---
 
-const PIPELINE_GROUPS = [
-    { id: 'Foundation', label: '基础地理', icon: Globe, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { id: 'Location', label: '地点与地址', icon: MapPin, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { id: 'LastMile', label: '末端场景', icon: Footprints, color: 'text-amber-600', bg: 'bg-amber-50' },
+const AVAILABLE_CAPABILITIES = [
+    { id: 'F01', name: 'SAM 2 (Auto-Segment)', type: 'AI' },
+    { id: 'A02', name: 'Road Centerline Extractor', type: 'Algorithm' },
+    { id: 'L01', name: 'Topo-Snapping Rule', type: 'QA' },
+];
+
+const WORKBENCH_TOOLS = [
+    { id: 'wand', label: 'SAM 魔棒', icon: Wand2 },
+    { id: 'spline', label: '样条线提取', icon: Spline },
+    { id: 'magnet', label: '拓扑吸附', icon: Magnet },
+    { id: 'select', label: '框选工具', icon: MousePointer2 },
 ];
 
 export const MOCK_SOPS: SOP[] = [
@@ -119,63 +139,152 @@ export const MOCK_SOPS: SOP[] = [
         steps: [
             { id: 'st-1', title: '等级确认', description: '根据国标确认道路功能等级', type: 'check', required: true }
         ]
-    },
-    {
-        id: 'SOP-005-v1.2',
-        seriesId: 'SOP-005',
-        pipeline: 'Road',
-        subPipeline: 'road-fix',
-        title: '路网拓扑检查规范',
-        version: 'v1.2',
-        updatedAt: '2023-10-29',
-        author: 'QA Team',
-        status: 'Draft',
-        sortOrder: 3,
-        steps: [
-            { id: 'st-1', title: '运行自动检查', description: '执行 Topology Checker 插件', type: 'action', required: true }
-        ]
-    },
-    {
-        id: 'SOP-002-v1.2',
-        seriesId: 'SOP-002',
-        pipeline: 'POI',
-        subPipeline: 'poi-new',
-        title: 'POI 信息采集规范',
-        version: 'v1.2',
-        updatedAt: '2023-10-20',
-        author: 'Data Ops',
-        status: 'Published',
-        sortOrder: 1,
-        steps: [
-            { id: 'st-1', title: '名称核对', description: '对比招牌名称与工商注册名称。', type: 'check', required: true },
-            { id: 'st-2', title: '分类确认', description: '依据国标分类表选择正确的行业分类。', type: 'input', required: true },
-        ]
-    },
-    {
-        id: 'SOP-003-v0.9',
-        seriesId: 'SOP-003',
-        pipeline: 'Admin',
-        subPipeline: 'admin-adjust',
-        title: '行政区划边界调整指引',
-        version: 'v0.9 (Draft)',
-        updatedAt: '2023-10-28',
-        author: 'Policy Dept',
-        status: 'Draft',
-        sortOrder: 1,
-        steps: [
-            { id: 'st-1', title: '公文解读', description: '阅读并高亮政府公文中的关键界线描述。', type: 'action', required: true },
-        ]
     }
+];
+
+// FIX: Define PIPELINE_GROUPS constant for sidebar category filtering
+const PIPELINE_GROUPS = [
+    { id: 'Foundation', label: '基础地理', icon: Globe, color: 'text-indigo-600' },
+    { id: 'Location', label: '地点与地址', icon: MapPin, color: 'text-emerald-600' },
+    { id: 'LastMile', label: '末端场景', icon: Footprints, color: 'text-amber-600' },
 ];
 
 // --- Sub-Components ---
 
+const StepConfigDrawer = ({ step, onClose, onSave }: { step: SOPStep, onClose: () => void, onSave: (config: any) => void }) => {
+    const [activeTab, setActiveTab] = useState<'automation' | 'workbench' | 'validation'>('automation');
+    const [config, setConfig] = useState(step.config || { capabilityId: '', workbenchTools: ['select'], rules: [] });
+
+    const toggleTool = (toolId: string) => {
+        const nextTools = config.workbenchTools?.includes(toolId) 
+            ? config.workbenchTools.filter(id => id !== toolId)
+            : [...(config.workbenchTools || []), toolId];
+        setConfig({ ...config, workbenchTools: nextTools });
+    };
+
+    return (
+        <div className="absolute inset-0 z-50 flex justify-end bg-slate-900/20 backdrop-blur-[2px]">
+            <div className="w-[450px] h-full bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <div>
+                        <div className="text-[10px] font-bold text-primary-600 uppercase tracking-widest mb-1">配置步骤动作</div>
+                        <h3 className="text-lg font-bold text-slate-900">{step.title}</h3>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                <div className="flex border-b border-slate-100 px-6 gap-6 bg-white shrink-0">
+                    <button onClick={() => setActiveTab('automation')} className={`py-3 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${activeTab === 'automation' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-400'}`}>
+                        <Cpu className="w-4 h-4" /> 自动化能力
+                    </button>
+                    <button onClick={() => setActiveTab('workbench')} className={`py-3 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${activeTab === 'workbench' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-400'}`}>
+                        <Wand2 className="w-4 h-4" /> 工具箱配置
+                    </button>
+                    <button onClick={() => setActiveTab('validation')} className={`py-3 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${activeTab === 'validation' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-400'}`}>
+                        <ShieldCheck className="w-4 h-4" /> 校验规则
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-50/30">
+                    {activeTab === 'automation' && (
+                        <div className="space-y-6">
+                            <section>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-3">关联模型/算法 (Capability Center)</label>
+                                <div className="space-y-2">
+                                    {AVAILABLE_CAPABILITIES.map(cap => (
+                                        <div 
+                                            key={cap.id}
+                                            onClick={() => setConfig({ ...config, capabilityId: cap.id })}
+                                            className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                                                config.capabilityId === cap.id ? 'bg-primary-50 border-primary-500 shadow-sm' : 'bg-white border-slate-100 hover:border-slate-200'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-2 rounded-lg ${cap.type === 'AI' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                                    <Cpu className="w-4 h-4" />
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm font-bold text-slate-800">{cap.name}</div>
+                                                    <div className="text-[10px] text-slate-400 uppercase font-mono">{cap.id} • {cap.type}</div>
+                                                </div>
+                                            </div>
+                                            {config.capabilityId === cap.id && <div className="w-5 h-5 bg-primary-600 rounded-full flex items-center justify-center text-white"><Check className="w-3 h-3" /></div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                            
+                            <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-3">
+                                <AlertCircle className="w-4 h-4 text-blue-500 mt-0.5" />
+                                <p className="text-xs text-blue-700 leading-relaxed">
+                                    配置自动化能力后，作业员进入此步骤时，系统将自动触发该能力进行预处理或生成建议数据。
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'workbench' && (
+                        <div className="space-y-6">
+                            <section>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-3">可见工具 (Workbench Tools)</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {WORKBENCH_TOOLS.map(tool => (
+                                        <div 
+                                            key={tool.id}
+                                            onClick={() => toggleTool(tool.id)}
+                                            className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${
+                                                config.workbenchTools?.includes(tool.id) ? 'bg-primary-50 border-primary-500 shadow-sm text-primary-700' : 'bg-white border-slate-100 hover:border-slate-200 text-slate-600'
+                                            }`}
+                                        >
+                                            <tool.icon className="w-6 h-6" />
+                                            <span className="text-xs font-bold">{tool.label}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        </div>
+                    )}
+
+                    {activeTab === 'validation' && (
+                        <div className="space-y-6">
+                            <section>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-3">强制质检规则</label>
+                                <div className="space-y-3">
+                                    {['拓扑连通性检查', '要素自相交检查', '必填属性检查'].map((rule, i) => (
+                                        <label key={i} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors">
+                                            <div className="flex items-center gap-3">
+                                                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                                                <span className="text-sm font-medium text-slate-700">{rule}</span>
+                                            </div>
+                                            <input type="checkbox" defaultChecked={i === 0} className="w-4 h-4 accent-primary-600 rounded" />
+                                        </label>
+                                    ))}
+                                </div>
+                            </section>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-white shrink-0">
+                    <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold rounded-xl transition-colors">取消</button>
+                    <button 
+                        onClick={() => onSave(config)}
+                        className="px-6 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-200 transition-all flex items-center gap-2"
+                    >
+                        <Save className="w-4 h-4" /> 保存配置
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const SOPStats = ({ sops }: { sops: SOP[] }) => {
-    // Unique series count
     const uniqueSeries = new Set(sops.map(s => s.seriesId)).size;
     const published = sops.filter(s => s.status === 'Published').length;
     const drafts = sops.filter(s => s.status === 'Draft').length;
-    // Calculate average steps (mock complexity metric)
     const avgSteps = sops.length > 0 
         ? (sops.reduce((acc, s) => acc + s.steps.length, 0) / sops.length).toFixed(1)
         : '0';
@@ -312,13 +421,28 @@ const SOPListTable = ({ sops, onSelect, getPipelineLabel }: { sops: SOP[], onSel
 
 const SOPEditor = ({ sop, relatedVersions, onBack, onSelectVersion }: { sop: SOP, relatedVersions: SOP[], onBack: () => void, onSelectVersion: (sop: SOP) => void }) => {
     const [showHistory, setShowHistory] = useState(false);
+    const [configuringStep, setConfiguringStep] = useState<SOPStep | null>(null);
+
+    const handleSaveConfig = (config: any) => {
+        // In a real app, this would update the SOP's steps state
+        console.log('Saved step configuration:', config);
+        setConfiguringStep(null);
+    };
 
     return (
         <div className="h-full flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200 relative">
+            {configuringStep && (
+                <StepConfigDrawer 
+                    step={configuringStep} 
+                    onClose={() => setConfiguringStep(null)} 
+                    onSave={handleSaveConfig} 
+                />
+            )}
+            
             {/* Header */}
             <div className="h-16 px-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
                 <div className="flex items-center gap-4">
-                    <button onClick={onBack} className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                    <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
                     <div className="h-6 w-px bg-slate-200"></div>
@@ -419,8 +543,13 @@ const SOPEditor = ({ sop, relatedVersions, onBack, onSelectVersion }: { sop: SOP
                                                 </div>
                                             </div>
                                             <p className="text-sm text-slate-600 leading-relaxed">{step.description}</p>
-                                            <div className="flex justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button className="text-xs font-bold text-primary-600 hover:underline">配置动作 &rarr;</button>
+                                            <div className="flex justify-end mt-4 pt-3 border-t border-slate-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={() => setConfiguringStep(step)}
+                                                    className="text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-50 hover:bg-primary-100 transition-colors"
+                                                >
+                                                    <Settings2 className="w-3.5 h-3.5" /> 配置动作 &rarr;
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -500,7 +629,6 @@ const SOPFormModal = ({ isOpen, onClose, onSave }: { isOpen: boolean, onClose: (
         subPipeline: ''
     });
 
-    // Reset form when opening
     useEffect(() => {
         if (isOpen) {
             setFormData({
@@ -592,11 +720,9 @@ export const SOPManager = () => {
     // --- Filter Logic ---
     const filteredSOPs = useMemo(() => {
         return sops.filter(s => {
-            // Category Filter
             let matchCategory = true;
             if (activeCategory !== 'All') {
                 const pipeline = pipelines.find(p => p.value === s.pipeline);
-                // Check if activeCategory matches the Pipeline Group Code (Foundation, etc.) or specific Pipeline Value
                 if (pipeline?.code === activeCategory) {
                     matchCategory = true;
                 } else if (s.pipeline === activeCategory) {
@@ -605,18 +731,12 @@ export const SOPManager = () => {
                     matchCategory = false;
                 }
             }
-
-            // Status Filter
             const matchStatus = statusFilter === 'All' || s.status === statusFilter;
-
-            // Search
             const matchSearch = s.title.toLowerCase().includes(searchQuery.toLowerCase()) || s.pipeline.toLowerCase().includes(searchQuery.toLowerCase());
-
             return matchCategory && matchStatus && matchSearch;
         });
     }, [sops, activeCategory, statusFilter, searchQuery, pipelines]);
 
-    // Handle Create
     const handleSaveSOP = (formData: Partial<SOP>) => {
         const newSOP: SOP = {
             id: `SOP-${Date.now()}-v1.0`,
@@ -633,18 +753,15 @@ export const SOPManager = () => {
         };
         setSops([...sops, newSOP]);
         setIsCreateModalOpen(false);
-        setSelectedSOP(newSOP); // Open editor immediately
+        setSelectedSOP(newSOP);
     };
 
-    // Calculate related versions for selected SOP
     const relatedVersions = useMemo(() => {
         if (!selectedSOP) return [];
         return sops
             .filter(s => s.seriesId === selectedSOP.seriesId)
             .sort((a, b) => b.version.localeCompare(a.version));
     }, [sops, selectedSOP]);
-
-    // --- Render ---
 
     if (selectedSOP) {
         return <SOPEditor 
@@ -663,10 +780,8 @@ export const SOPManager = () => {
                 onSave={handleSaveSOP} 
             />
 
-            {/* 1. Statistics Dashboard */}
             <SOPStats sops={filteredSOPs} />
 
-            {/* 2. Toolbar */}
             <div className="flex justify-between items-center mb-4 shrink-0 px-1">
                 <div className="flex gap-3 items-center">
                     <div className="relative">
@@ -718,7 +833,6 @@ export const SOPManager = () => {
             </div>
 
             <div className="flex-1 flex gap-6 min-h-0">
-                {/* 3. Sidebar (Filters) */}
                 <aside className="w-56 glass-panel rounded-xl p-4 flex flex-col shrink-0 bg-white">
                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">分类筛选</h3>
                     <div className="space-y-1.5 overflow-y-auto flex-1">
@@ -741,7 +855,6 @@ export const SOPManager = () => {
                                 >
                                     <group.icon className={`w-4 h-4 ${group.color}`}/> {group.label}
                                 </button>
-                                {/* Sub-items (Pipelines in this group) */}
                                 <div className="ml-4 mt-1 space-y-1 border-l border-slate-100 pl-2">
                                     {pipelines.filter(p => p.code === group.id).map(p => (
                                         <button
@@ -760,7 +873,6 @@ export const SOPManager = () => {
                     </div>
                 </aside>
 
-                {/* 4. Main Content (Grid/List) */}
                 <main className="flex-1 overflow-hidden">
                     {viewMode === 'card' ? (
                         <div className="h-full overflow-y-auto pr-2">
